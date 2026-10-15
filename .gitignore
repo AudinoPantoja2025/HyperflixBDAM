@@ -19,6 +19,9 @@ benchmark_resultado*.txt
 # Logs y reportes de ejecucion
 logs/
 
+# Documentos Word locales (informes en edicion, no se versionan)
+docs/
+
 # Terraform / IaC (estado y secretos locales; los .tf SI se versionan)
 infra/terraform/.terraform/
 infra/terraform/*.tfstate
