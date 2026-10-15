@@ -1,0 +1,27 @@
+# Credenciales y entorno
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+
+# Datos generados por el pipeline (Data Lake local)
+data_lake/
+data_lake_new/
+
+# Reportes de benchmarking (regenerables con scripts/benchmarking_consultas.py)
+benchmark_resultado*.txt
+
+# Logs y reportes de ejecucion
+logs/
+
+# Terraform / IaC (estado y secretos locales; los .tf SI se versionan)
+infra/terraform/.terraform/
+infra/terraform/*.tfstate
+infra/terraform/*.tfstate.*
+infra/terraform/terraform.tfvars
+infra/terraform/crash.log
