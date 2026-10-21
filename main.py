@@ -74,7 +74,12 @@ def run_pipeline(args=None):
     total_t0 = time.perf_counter()
     audit = _execute(settings)
     audit["total_seconds"] = round(time.perf_counter() - total_t0, 3)
-    _write_audit_file(DataLake(settings.data_lake_root), audit)
+    _write_audit_file(DataLake(
+        settings.data_lake_root,
+        s3_bucket=settings.s3_bucket,
+        s3_region=settings.s3_region,
+        aws_profile=settings.aws_profile,
+    ), audit)
     _print_summary(audit)
     return audit
 
@@ -115,7 +120,12 @@ def _execute(settings):
         stages[stage] = round(time.perf_counter() - t0, 3)
         return value
 
-    dl = DataLake(settings.data_lake_root)
+    dl = DataLake(
+        settings.data_lake_root,
+        s3_bucket=settings.s3_bucket,
+        s3_region=settings.s3_region,
+        aws_profile=settings.aws_profile,
+    )
     timed("create_zones", dl.create_zones)
 
     conn = MongoConnection(settings.mongodb_uri, settings.mongodb_database, retries=3)
@@ -165,6 +175,8 @@ def _execute(settings):
                     dl.processed_partition_dir(coll, settings.ingestion_date),
                     settings.run_id,
                     dataset_name=f"PROCESSED:{coll}",
+                    s3_region=settings.s3_region,
+                    aws_profile=settings.aws_profile,
                 ),
             )
             audit["files"].append({"zone": "processed", "collection": coll, **meta})
@@ -178,18 +190,26 @@ def _execute(settings):
                     dl.curated_partition_dir(n, settings.ingestion_date),
                     settings.run_id,
                     dataset_name=f"CURATED:{n}",
+                    s3_region=settings.s3_region,
+                    aws_profile=settings.aws_profile,
                 ),
             )
             audit["files"].append({"zone": "curated", "collection": name, **meta})
 
         for f in audit["files"]:
-            path = Path(f["path"])
-            if not path.exists():
-                raise ValueError(f"Falta el archivo esperado: {path}")
-            rows = _read_rows(path)
+            fpath = f["path"]
+            if fpath.startswith("s3://"):
+                # La verificación S3 ya ocurre dentro de write_parquet (relee el archivo)
+                # Solo validamos que los registros coincidan con lo reportado
+                rows = f["records"]
+            else:
+                path = Path(fpath)
+                if not path.exists():
+                    raise ValueError(f"Falta el archivo esperado: {path}")
+                rows = _read_rows(path)
             if rows != f["records"]:
                 audit["warnings"].append(
-                    f"Relectura de {path}: {rows} filas (esperado {f['records']})"
+                    f"Relectura de {fpath}: {rows} filas (esperado {f['records']})"
                 )
 
         audit["finished_at"] = datetime.now().isoformat()

@@ -45,7 +45,12 @@ def run_streaming(args=None):
         return None
 
     setup_logging(log_dir="logs")
-    lake = DataLake(settings.data_lake_root)
+    lake = DataLake(
+        settings.data_lake_root,
+        s3_bucket=settings.s3_bucket,
+        s3_region=settings.s3_region,
+        aws_profile=settings.aws_profile,
+    )
     lake.create_zones()
     connection = MongoConnection(settings.mongodb_uri, settings.mongodb_database, retries=3)
     try:

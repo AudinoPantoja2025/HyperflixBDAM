@@ -21,6 +21,9 @@ DEFAULT_DATABASE = "sample_mflix"
 DEFAULT_COLLECTIONS = ["users", "movies", "comments", "theaters"]
 REQUIRED_ENV_VARS = ("MONGODB_URI", "MONGODB_DATABASE")
 
+# Nombre del bucket S3 por defecto (puede sobreescribirse con S3_BUCKET_NAME)
+DEFAULT_S3_BUCKET = ""
+
 # El proyecto existente usa historicamente MONGO_URI; se mantiene como
 # alternativa respaldada (MONGODB_URI tiene prioridad).
 LEGACY_URI_VAR = "MONGO_URI"
@@ -39,7 +42,16 @@ class Settings:
     batch_size: int
     run_id: str
     ingestion_date: str
+    # Configuración S3 (vacío = modo local)
+    s3_bucket: str = ""
+    s3_region: str = "us-east-2"
+    aws_profile: Optional[str] = None
     required_env_vars: List[str] = field(default_factory=lambda: list(REQUIRED_ENV_VARS))
+
+    @property
+    def use_s3(self) -> bool:
+        """True si hay un bucket S3 configurado."""
+        return bool(self.s3_bucket)
 
 
 def mask_uri(uri: str) -> str:
@@ -63,6 +75,9 @@ def _reset_env():
         "MONGODB_COLLECTIONS",
         "DATA_LAKE_ROOT",
         "MONGO_BATCH_SIZE",
+        "S3_BUCKET_NAME",
+        "S3_REGION",
+        "AWS_PROFILE",
     ]
     for key in keys:
         os.environ.pop(key, None)
@@ -95,6 +110,11 @@ def load_settings(env_path: Optional[str] = None) -> Settings:
     root = Path(os.getenv("DATA_LAKE_ROOT", "data_lake"))
     batch_size = int(os.getenv("MONGO_BATCH_SIZE", "1000") or "1000")
 
+    # Configuración S3 (opcionales)
+    s3_bucket = (os.getenv("S3_BUCKET_NAME") or DEFAULT_S3_BUCKET).strip()
+    s3_region = (os.getenv("S3_REGION") or "us-east-2").strip()
+    aws_profile = os.getenv("AWS_PROFILE") or None
+
     now = datetime.now()
     settings = Settings(
         mongodb_uri=uri,
@@ -104,12 +124,16 @@ def load_settings(env_path: Optional[str] = None) -> Settings:
         batch_size=batch_size,
         run_id=now.strftime("%Y%m%d_%H%M%S"),
         ingestion_date=now.strftime("%Y-%m-%d"),
+        s3_bucket=s3_bucket,
+        s3_region=s3_region,
+        aws_profile=aws_profile,
     )
+    storage_mode = f"S3 (s3://{s3_bucket})" if settings.use_s3 else f"Local ({root})"
     logger.info(
-        "Configuracion cargada: db='%s', colecciones=%s, root='%s', uri=%s",
+        "Configuracion cargada: db='%s', colecciones=%s, storage=%s, uri=%s",
         settings.mongodb_database,
         settings.mongodb_collections,
-        settings.data_lake_root,
+        storage_mode,
         mask_uri(settings.mongodb_uri),
     )
     return settings
