@@ -114,24 +114,27 @@ class DataLake:
                 ", ".join(self.zones),
             )
 
-    def zone_path(self, zone: str, *parts) -> str:
-        """Devuelve la ruta (local o S3) para una zona y subpartes dadas."""
+    def zone_path(self, zone: str, *parts):
+        """Devuelve la ruta para una zona.
+        - Modo S3  : str  ``s3://bucket/zone/parte1/parte2``
+        - Modo local: Path ``data_lake/zone/parte1/parte2``
+        """
         if self.use_s3:
             return self._s3_prefix(zone, *[str(p) for p in parts])
-        return str(self.root / zone / Path(*parts)) if parts else str(self.root / zone)
+        return (self.root / zone / Path(*parts)) if parts else (self.root / zone)
 
-    def raw_partition_dir(self, collection: str, ingestion_date: str) -> str:
+    def raw_partition_dir(self, collection: str, ingestion_date: str):
         return self.zone_path("raw", collection, f"ingestion_date={ingestion_date}")
 
-    def processed_partition_dir(self, collection: str, ingestion_date: str) -> str:
+    def processed_partition_dir(self, collection: str, ingestion_date: str):
         return self.zone_path("processed", collection, f"ingestion_date={ingestion_date}")
 
-    def curated_partition_dir(self, dataset: str, ingestion_date: str) -> str:
+    def curated_partition_dir(self, dataset: str, ingestion_date: str):
         return self.zone_path("curated", dataset, f"ingestion_date={ingestion_date}")
 
     # ---------------------------------------------------------------- helpers
-    def _write_metadata(self, output_dir: str, run_id: str, metadata: Dict) -> str:
-        meta_path = output_dir.rstrip("/") + f"/run_{run_id}.meta.json"
+    def _write_metadata(self, output_dir, run_id: str, metadata: Dict) -> str:
+        meta_path = str(output_dir).rstrip("/") + f"/run_{run_id}.meta.json"
         payload = json.dumps(metadata, indent=2, ensure_ascii=False, default=str)
         if _is_s3(meta_path):
             fs = self._fs()
@@ -149,7 +152,8 @@ class DataLake:
     ) -> Dict:
         """Escribe los documentos originales como JSON Lines (extended JSON)."""
         out_dir = self.raw_partition_dir(collection, ingestion_date)
-        path = out_dir.rstrip("/") + f"/run_{run_id}.jsonl"
+        out_dir_str = str(out_dir).rstrip("/")
+        path = out_dir_str + f"/run_{run_id}.jsonl"
 
         lines = "".join(json_util.dumps(doc) + "\n" for doc in docs)
         count = lines.count("\n")
@@ -176,7 +180,7 @@ class DataLake:
             "bytes": size_bytes,
             "path": path,
         }
-        self._write_metadata(out_dir, run_id, metadata)
+        self._write_metadata(out_dir_str, run_id, metadata)
         logger.info(
             "RAW: '%s' -> %d documento(s) en %s (%d bytes)",
             collection, count, path, size_bytes,
@@ -220,17 +224,18 @@ class DataLake:
         return docs
 
     # ------------------------------------------------------------- rejected
-    def rejected_partition_dir(self, collection: str, ingestion_date: str) -> str:
+    def rejected_partition_dir(self, collection: str, ingestion_date: str):
         if self.use_s3:
             return self._s3_prefix("rejected", collection, f"ingestion_date={ingestion_date}")
-        return str(self.root / "rejected" / collection / f"ingestion_date={ingestion_date}")
+        return self.root / "rejected" / collection / f"ingestion_date={ingestion_date}"
 
     def write_rejected(
         self, collection: str, records, run_id: str, ingestion_date: str
-    ) -> str:
+    ):
         """Persiste registros rechazados (duplicados) como JSON Lines."""
         out_dir = self.rejected_partition_dir(collection, ingestion_date)
-        path = out_dir.rstrip("/") + f"/run_{run_id}.jsonl"
+        out_dir_str = str(out_dir).rstrip("/")
+        path = out_dir_str + f"/run_{run_id}.jsonl"
         lines = "".join(
             json.dumps(row.to_dict(), ensure_ascii=False, default=str) + "\n"
             for _, row in records.iterrows()
@@ -243,6 +248,7 @@ class DataLake:
             p = Path(path)
             p.parent.mkdir(parents=True, exist_ok=True)
             p.write_text(lines, encoding="utf-8")
+            path = p  # retornar Path en modo local para compatibilidad
 
         logger.warning(
             "RECHAZADOS: '%s' -> %d registro(s) en %s",
@@ -251,11 +257,11 @@ class DataLake:
         return path
 
     # ---------------------------------------------------------- CDC / streaming
-    def cdc_partition_dir(self, collection: str, ingestion_date: str) -> str:
+    def cdc_partition_dir(self, collection: str, ingestion_date: str):
         """Ruta inmutable para micro-lotes de Change Streams."""
         if self.use_s3:
             return self._s3_prefix("cdc", "raw", collection, f"ingestion_date={ingestion_date}")
-        return str(self.root / "cdc" / "raw" / collection / f"ingestion_date={ingestion_date}")
+        return self.root / "cdc" / "raw" / collection / f"ingestion_date={ingestion_date}"
 
     def cdc_checkpoint_path(self, collection: str) -> Path:
         """Ubicacion del ultimo token confirmado (siempre local para baja latencia)."""
@@ -275,7 +281,8 @@ class DataLake:
 
         out_dir = self.cdc_partition_dir(collection, ingestion_date)
         batch_suffix = f"{run_id}_batch_{batch_number:06d}"
-        path = out_dir.rstrip("/") + f"/run_{batch_suffix}.jsonl"
+        out_dir_str = str(out_dir).rstrip("/")
+        path = out_dir_str + f"/run_{batch_suffix}.jsonl"
 
         lines = "".join(json_util.dumps(event) + "\n" for event in events)
 
@@ -312,7 +319,7 @@ class DataLake:
             "bytes": size,
             "path": path,
         }
-        self._write_metadata(out_dir, batch_suffix, metadata)
+        self._write_metadata(out_dir_str, batch_suffix, metadata)
         logger.info("CDC RAW: '%s' -> %d evento(s) en %s", collection, len(events), path)
         return metadata
 

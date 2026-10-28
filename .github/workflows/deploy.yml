@@ -1,0 +1,164 @@
+name: CI/CD Pipeline — DataOps
+
+# Se ejecuta en cada push a main o en Pull Requests hacia main
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Variables de entorno disponibles en todos los jobs
+# Los valores reales se configuran en GitHub → Settings → Secrets → Actions
+env:
+  PYTHON_VERSION: "3.12"
+  MONGODB_DATABASE: sample_mflix
+
+jobs:
+  # ─────────────────────────────────────────────────
+  # JOB 1: Tests del código Python
+  # ─────────────────────────────────────────────────
+  test:
+    name: Pruebas Python (pytest)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout del repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Instalar dependencias
+        run: pip install -r requirements.txt
+
+      - name: Ejecutar tests unitarios
+        # Los tests están diseñados para correr SIN conexión real a MongoDB ni AWS
+        # Usan mocks y fixtures locales (ver tests/conftest.py)
+        run: python -m pytest tests/ -q --no-header --tb=short
+        env:
+          # Variables mínimas para que config.py no falle al importar
+          MONGODB_URI: "mongodb://localhost:27017"
+          MONGODB_DATABASE: ${{ env.MONGODB_DATABASE }}
+
+      - name: Subir reporte de cobertura (opcional)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: .pytest_cache/
+          retention-days: 7
+
+  # ─────────────────────────────────────────────────
+  # JOB 2: Validación de infraestructura con Terraform
+  # ─────────────────────────────────────────────────
+  terraform-validate:
+    name: Terraform Plan (validación)
+    runs-on: ubuntu-latest
+    # Solo corre si los tests pasaron
+    needs: test
+
+    defaults:
+      run:
+        working-directory: infra/terraform
+
+    steps:
+      - name: Checkout del repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.0"
+
+      - name: terraform init
+        run: terraform init -backend=false
+        # -backend=false evita que intente conectarse al backend remoto
+        # Solo valida la sintaxis y los providers
+
+      - name: terraform validate
+        run: terraform validate
+
+      - name: terraform fmt (verificar formato)
+        run: terraform fmt -check -recursive
+        continue-on-error: true
+        # No falla el pipeline si hay problemas de formato,
+        # pero sí lo reporta como warning
+
+  # ─────────────────────────────────────────────────
+  # JOB 3: Verificar conexión con S3 y BigQuery
+  # Solo en push a main (no en PRs — requiere secrets reales)
+  # ─────────────────────────────────────────────────
+  verify-cloud:
+    name: Verificar conexiones cloud
+    runs-on: ubuntu-latest
+    needs: [test, terraform-validate]
+    # Solo se ejecuta en push a main, no en pull_request
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Checkout del repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Instalar dependencias
+        run: pip install -r requirements.txt
+
+      - name: Escribir credenciales BigQuery
+        # Recrea el archivo JSON desde el secret de GitHub
+        run: |
+          mkdir -p credentials
+          echo '${{ secrets.BIGQUERY_KEY_JSON }}' > credentials/bigquery_key.json
+
+      - name: Verificar conexión S3
+        run: |
+          python - <<'EOF'
+          import boto3, os, sys
+          s3 = boto3.client(
+              "s3",
+              region_name=os.environ["S3_REGION"],
+              aws_access_key_id=os.environ["AWS_ACCESS_KEY_ID"],
+              aws_secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"],
+          )
+          bucket = os.environ["S3_BUCKET_NAME"]
+          resp = s3.list_buckets()
+          buckets = [b["Name"] for b in resp["Buckets"]]
+          if bucket not in buckets:
+              print(f"ERROR: bucket '{bucket}' no encontrado"); sys.exit(1)
+          print(f"OK: bucket '{bucket}' accesible")
+          EOF
+        env:
+          AWS_ACCESS_KEY_ID:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          S3_REGION:             ${{ secrets.S3_REGION }}
+          S3_BUCKET_NAME:        ${{ secrets.S3_BUCKET_NAME }}
+
+      - name: Verificar conexión BigQuery
+        run: |
+          python - <<'EOF'
+          from google.cloud import bigquery
+          from google.oauth2 import service_account
+          import os, sys
+          creds = service_account.Credentials.from_service_account_file(
+              "credentials/bigquery_key.json",
+              scopes=["https://www.googleapis.com/auth/bigquery"],
+          )
+          client = bigquery.Client(
+              project=os.environ["BIGQUERY_PROJECT_ID"], credentials=creds
+          )
+          dataset = os.environ["BIGQUERY_DATASET"]
+          datasets = [d.dataset_id for d in client.list_datasets()]
+          if dataset not in datasets:
+              print(f"ERROR: dataset '{dataset}' no encontrado"); sys.exit(1)
+          print(f"OK: dataset '{dataset}' accesible con {len(datasets)} dataset(s)")
+          EOF
+        env:
+          BIGQUERY_PROJECT_ID: ${{ secrets.BIGQUERY_PROJECT_ID }}
+          BIGQUERY_DATASET:    ${{ secrets.BIGQUERY_DATASET }}
