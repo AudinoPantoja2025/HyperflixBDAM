@@ -102,6 +102,43 @@ jobs:
       - name: Checkout del repositorio
         uses: actions/checkout@v4
 
+      - name: Validar secrets de GitHub Actions
+        # Falla rapido y con mensaje claro si falta algun secret.
+        # Sin este paso, un secret vacio provoca errores cripticos:
+        # p.ej. boto3 -> "Invalid endpoint: https://s3..amazonaws.com"
+        # porque region_name queda como cadena vacia.
+        run: |
+          requeridos=(
+            AWS_ACCESS_KEY_ID
+            AWS_SECRET_ACCESS_KEY
+            S3_REGION
+            S3_BUCKET_NAME
+            BIGQUERY_KEY_JSON
+            BIGQUERY_PROJECT_ID
+            BIGQUERY_DATASET
+          )
+          faltantes=()
+          for nombre in "${requeridos[@]}"; do
+            valor="${!nombre}"
+            valor="${valor//[[:space:]]/}"   # ignora espacios/saltos de linea
+            if [ -z "$valor" ]; then faltantes+=("$nombre"); fi
+          done
+          if [ ${#faltantes[@]} -gt 0 ]; then
+            echo "::error title=Secrets faltantes::Faltan ${#faltantes[@]} secrets: ${faltantes[*]}"
+            echo "Agregalos en GitHub -> Settings -> Secrets and variables -> Actions"
+            echo "(los valores no se muestran por seguridad)"
+            exit 1
+          fi
+          echo "OK: los ${#requeridos[@]} secrets requeridos estan definidos"
+        env:
+          AWS_ACCESS_KEY_ID:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          S3_REGION:             ${{ secrets.S3_REGION }}
+          S3_BUCKET_NAME:        ${{ secrets.S3_BUCKET_NAME }}
+          BIGQUERY_KEY_JSON:     ${{ secrets.BIGQUERY_KEY_JSON }}
+          BIGQUERY_PROJECT_ID:   ${{ secrets.BIGQUERY_PROJECT_ID }}
+          BIGQUERY_DATASET:      ${{ secrets.BIGQUERY_DATASET }}
+
       - name: Configurar Python ${{ env.PYTHON_VERSION }}
         uses: actions/setup-python@v5
         with:
@@ -116,6 +153,8 @@ jobs:
         run: |
           mkdir -p credentials
           echo '${{ secrets.BIGQUERY_KEY_JSON }}' > credentials/bigquery_key.json
+          python -m json.tool credentials/bigquery_key.json > /dev/null
+          echo "OK: credencial BigQuery escrita y validada como JSON"
 
       - name: Verificar conexión S3
         run: |
