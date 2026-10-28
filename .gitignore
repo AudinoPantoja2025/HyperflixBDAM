@@ -3,6 +3,9 @@
 .env.*
 !.env.example
 
+# Credenciales de servicios cloud (NUNCA subir al repo)
+credentials/
+
 # Python
 __pycache__/
 *.pyc
