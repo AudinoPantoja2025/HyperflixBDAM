@@ -1,9 +1,9 @@
 """Pruebas aisladas del Quality Gate Spark."""
 
-import pytest
-import sys
 import os
+import sys
 
+import pytest
 pyspark = pytest.importorskip("pyspark")
 from pyspark.sql import SparkSession
 from pyspark.sql import Row
@@ -16,7 +16,7 @@ def spark():
     os.environ["PYSPARK_PYTHON"] = sys.executable
     os.environ["PYSPARK_DRIVER_PYTHON"] = sys.executable
     session = (
-        SparkSession.builder.master("local[2]")
+        SparkSession.Builder().master("local[2]")
         .appName("quality-gate-tests")
         .config("spark.ui.enabled", "false")
         .getOrCreate()
@@ -35,7 +35,9 @@ def test_quality_gate_rechaza_pelicula_con_titulo_rating_y_runtime_invalidos(spa
     assert result.metrics["total_records"] == 2
     assert result.metrics["valid_records"] == 1
     assert result.metrics["rejected_records"] == 1
-    assert "movie_title_required" in result.rejected_df.select("quality_errors").first()[0]
+    rejected = result.rejected_df.select("quality_errors").first()
+    assert rejected is not None
+    assert "movie_title_required" in rejected["quality_errors"]
 
 
 def test_quality_gate_detecta_duplicados_y_conserva_cuarentena(spark):
@@ -70,4 +72,6 @@ def test_comments_valida_referencia_a_movies(spark):
     result = validate_collection(comments, "comments", movies_df=movies)
 
     assert result.metrics["rejected_records"] == 1
-    assert "comment_movie_reference_exists" in result.rejected_df.first()["quality_errors"]
+    rejected = result.rejected_df.first()
+    assert rejected is not None
+    assert "comment_movie_reference_exists" in rejected["quality_errors"]
