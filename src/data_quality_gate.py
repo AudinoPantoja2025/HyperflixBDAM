@@ -45,7 +45,12 @@ def _movie_rules(df: DataFrame) -> list[tuple[str, Column]]:
     rules: list[tuple[str, Column]] = []
     if "title" in df.columns:
         rules.append(("movie_title_required", ~_text_present("title")))
-    if "imdb" in df.columns:
+    if "imdb_rating" in df.columns:
+        rating = F.col("imdb_rating").cast("double")
+        rules.append(
+            ("movie_imdb_rating_range", rating.isNotNull() & ((rating < 0) | (rating > 10)))
+        )
+    elif "imdb" in df.columns and isinstance(df.schema["imdb"].dataType, StructType):
         rating = F.col("imdb.rating").cast("double")
         rules.append(
             ("movie_imdb_rating_range", rating.isNotNull() & ((rating < 0) | (rating > 10)))
@@ -283,7 +288,13 @@ def simulate_dirty_data(df: DataFrame, collection: str) -> DataFrame:
         if "year" in df.columns:
             dirty = dirty.withColumn("year", F.lit(1800).cast(df.schema["year"].dataType))
             dirty_reason = "invalid_year"
-        if "imdb" in df.columns:
+        if "imdb_rating" in df.columns:
+            dirty = dirty.withColumn(
+                "imdb_rating",
+                F.lit(11.0).cast(df.schema["imdb_rating"].dataType),
+            )
+            dirty_reason = "invalid_imdb_rating"
+        elif "imdb" in df.columns and isinstance(df.schema["imdb"].dataType, StructType):
             dirty = dirty.withColumn(
                 "imdb",
                 F.col("imdb").withField("rating", F.lit(11.0)),
