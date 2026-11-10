@@ -117,13 +117,16 @@ def _user_rules(df: DataFrame) -> list[tuple[str, Column]]:
 def _theater_rules(df: DataFrame) -> list[tuple[str, Column]]:
     rules: list[tuple[str, Column]] = []
     if "theaterId" in df.columns:
+        theater_id = F.col("theaterId")
+        numeric_id = theater_id.cast("long")
         rules.append(
             (
                 "theater_id_numeric",
-                F.col("theaterId").isNotNull()
-                & F.col("theaterId").cast("long").isNull(),
+                theater_id.isNotNull() & numeric_id.isNull(),
             )
         )
+        if df.schema["theaterId"].dataType.simpleString() in {"byte", "short", "int", "long"}:
+            rules.append(("theater_id_positive", theater_id.isNotNull() & (theater_id <= 0)))
     return rules
 
 
@@ -311,7 +314,13 @@ def simulate_dirty_data(df: DataFrame, collection: str) -> DataFrame:
         dirty = dirty.withColumn("name", F.lit(""))
         dirty_reason = "missing_user_name"
     elif collection == "theaters" and "theaterId" in df.columns:
-        dirty = dirty.withColumn("theaterId", F.lit("not-a-number"))
+        theater_type = df.schema["theaterId"].dataType
+        invalid_theater_id = (
+            F.lit("not-a-number")
+            if theater_type.simpleString() == "string"
+            else F.lit(-1).cast(theater_type)
+        )
+        dirty = dirty.withColumn("theaterId", invalid_theater_id)
         dirty_reason = "invalid_theater_id"
 
     dirty = (
