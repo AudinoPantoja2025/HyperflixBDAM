@@ -63,6 +63,26 @@ def test_simulacion_no_modifica_dataframe_original(spark):
     assert dirty.where("_simulated_dirty_record").count() == 2
 
 
+def test_simulacion_movies_usa_imdb_rating_cuando_imdb_es_string(spark):
+    original = spark.createDataFrame(
+        [
+            Row(
+                _id="m1",
+                title="Uno",
+                runtime=90.0,
+                year=2020.0,
+                imdb='{"rating": 7.0}',
+                imdb_rating=7.0,
+            )
+        ]
+    )
+
+    dirty = simulate_dirty_data(original, "movies")
+
+    assert dirty.where("_simulated_dirty_reason = 'invalid_imdb_rating'").count() == 2
+    assert dirty.where("imdb_rating = 11.0").count() == 2
+
+
 def test_comments_valida_referencia_a_movies(spark):
     movies = spark.createDataFrame([Row(_id="m1", title="Uno")])
     comments = spark.createDataFrame(
