@@ -23,8 +23,7 @@ benchmark_resultado*.txt
 logs/
 
 # Documentos Word locales (informes en edicion, no se versionan)
-docs/*
-docs/**/*.ipynb
+docs/
 
 # Terraform / IaC (estado y secretos locales; los .tf SI se versionan)
 infra/terraform/.terraform/
